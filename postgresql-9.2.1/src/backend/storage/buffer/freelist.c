@@ -111,8 +111,8 @@ static void AddBufferToRing(BufferAccessStrategy strategy,
 volatile BufferDesc *
 StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 {
-	volatile BufferDesc *buf;	//LIFO would use it
-	volatile BufferDesc *lastbuffer;
+	volatile BufferDesc *buf;
+	volatile BufferDesc *lastbuffer;  //LIFO would use it
 	Latch	   *bgwriterLatch;
 	int			trycounter;
 
@@ -246,7 +246,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 				}
 			}
 		}
-		else if ((!__LIFO) && (--trycounter <= 0))
+		else if ((!__LIFO) && (--trycounter == 0))
 		{
 			/*
 			 * We've scanned all the buffers without making any state changes,
