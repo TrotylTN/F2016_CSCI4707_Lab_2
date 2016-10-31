@@ -18,7 +18,7 @@
 #include "storage/buf_internals.h"
 #include "storage/bufmgr.h"
 
-
+#define __LIFO 1
 /*
  * The shared freelist control information.
  */
@@ -189,14 +189,31 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 
 	/* Nothing on the freelist, so run the "clock sweep" algorithm */
 	trycounter = NBuffers;
+
+	if (__LIFO) // LIFO
+	{
+		StrategyControl->nextVictimBuffer = NBuffers - 1;
+	}
+
 	for (;;)
 	{
 		buf = &BufferDescriptors[StrategyControl->nextVictimBuffer];
 
-		if (++StrategyControl->nextVictimBuffer >= NBuffers)
+		if (__LIFO) //LIFO
 		{
-			StrategyControl->nextVictimBuffer = 0;
-			StrategyControl->completePasses++;
+			if (--StrategyControl->nextVictimBuffer < 0)
+			{
+				StrategyControl->nextVictimBuffer = NBuffers - 1;
+				StrategyControl->completePasses++;
+			}
+		}
+		else
+		{
+			if (++StrategyControl->nextVictimBuffer >= NBuffers)
+			{
+				StrategyControl->nextVictimBuffer = 0;
+				StrategyControl->completePasses++;
+			}
 		}
 
 		/*
