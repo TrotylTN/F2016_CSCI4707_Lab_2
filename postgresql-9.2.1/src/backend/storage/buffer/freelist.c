@@ -111,7 +111,8 @@ static void AddBufferToRing(BufferAccessStrategy strategy,
 volatile BufferDesc *
 StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 {
-	volatile BufferDesc *buf;
+	volatile BufferDesc *buf;	//LIFO would use it
+	volatile BufferDesc *lastbuffer;
 	Latch	   *bgwriterLatch;
 	int			trycounter;
 
@@ -189,11 +190,9 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 
 	/* Nothing on the freelist, so run the "clock sweep" algorithm */
 	trycounter = NBuffers;
-
-	volatile BufferDesc *lastbuffer;
-
+	fprintf(stderr, "Buffer Size: %d\n", NBuffers);
 	if (__LIFO)
-	{	//LIFO
+	{	//LIFO, initialize the temp tag of last buffer
 		lastbuffer = NULL;
 	}
 
@@ -212,19 +211,24 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		 * it; decrement the usage_count (unless pinned) and keep scanning.
 		 */
 		LockBufHdr(buf);
+		if (__LIFO) //LIFO
+		{
+			// scaned a buffer and deduct the counter
+			trycounter--;
+		}
 		if (buf->refcount == 0)
 		{
 			if (__LIFO)
 			{	//LIFO
-				fprintf(stderr, "temp buf's id: %d\n", buf->buf_id);
+				fprintf(stderr, "buf's id: %d\n", buf->buf_id);
 				if (lastbuffer == NULL)
 				{
 					lastbuffer = buf;
 				}
-				if (buf->buf_id > lastbuffer->buf)
+				if (buf->buf_id > lastbuffer->buf_id)
 				{
-					lastbuffer = buf
-				}
+					lastbuffer = buf;
+				}				
 			}
 			else
 			{	//LRU				
@@ -242,7 +246,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 				}
 			}
 		}
-		else if (--trycounter == 0)
+		else if ((!__LIFO) && (--trycounter <= 0))
 		{
 			/*
 			 * We've scanned all the buffers without making any state changes,
@@ -251,22 +255,35 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 			 * probably better to fail than to risk getting stuck in an
 			 * infinite loop.
 			 */
-			if (__LIFO)
+			// LRU
+			UnlockBufHdr(buf);
+			elog(ERROR, "no unpinned buffers available");
+		}
+		UnlockBufHdr(buf);
+		if (__LIFO) //LIFO
+		{
+			if (trycounter == 0)
 			{
+				/* we've scanned all the buffers 
+				 * and tried to find the newest one
+				 */
 				if (lastbuffer != NULL)
 				{
-					/* Found a usable buffer */					
-					fprintf(stderr, "final choose's buf_id: %d\n\n",
+					/* Found the newest buffer */					
+					fprintf(stderr,
+							"the id of buf would be replaced: %d\n\n",
 							lastbuffer->buf_id);
 					if (strategy != NULL)
 						AddBufferToRing(strategy, lastbuffer);
 					return buf;
 				}
-			}
-			UnlockBufHdr(buf);
-			elog(ERROR, "no unpinned buffers available");
+				else
+				{
+					/* Found nothing*/
+					elog(ERROR, "no unpinned buffers available");	
+				}
+			}		
 		}
-		UnlockBufHdr(buf);
 	}
 
 	/* not reached */
