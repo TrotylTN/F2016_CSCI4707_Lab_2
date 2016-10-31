@@ -1,6 +1,6 @@
 Students:
-1. <Student 1 Full Name> (<Student 1 x500>)
-2. <Student 2 Full Name> (<Student 2 x500>)
+1. Tiannan Zhou (zhou0745)
+2. Xuan Bi (bixxx078)
 
 Brief Summary:
 <A Brief Summary about the change you make (1 Paragraph max)>
