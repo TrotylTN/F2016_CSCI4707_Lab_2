@@ -1,6 +1,6 @@
-postgresql/*
-postgresql
 postgresql-9.2.1.tar.gz
+sqlapp/
+sqlapp/*
 # Object files
 *.o
 *.ko
