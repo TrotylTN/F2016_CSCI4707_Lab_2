@@ -213,17 +213,17 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		 * it; decrement the usage_count (unless pinned) and keep scanning.
 		 */
 		LockBufHdr(buf);
-		if (__LIFO) //LIFO
+		if (__LIFO) // LIFO
 		{
 			// scaned a buffer and deduct the counter
 			trycounter--;
+			fprintf(stderr, "buf's id: %d; timestamp: %d\n",
+					buf->buf_id, timestamp[buf->buf_id]);			
 		}
 		if (buf->refcount == 0)
 		{
 			if (__LIFO)
-			{	//LIFO
-				fprintf(stderr, "buf's id: %d; timestamp: %d\n",
-						buf->buf_id, timestamp[buf->buf_id]);
+			{	// LIFO
 				if (lastbuffer == NULL)
 				{
 					lastbuffer = buf;
@@ -231,7 +231,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 				if (timestamp[buf->buf_id] >= timestamp[lastbuffer->buf_id])
 				{
 					lastbuffer = buf;
-				}				
+				}			
 			}
 			else
 			{	//LRU				
