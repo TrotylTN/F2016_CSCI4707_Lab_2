@@ -112,12 +112,24 @@ volatile BufferDesc *
 StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 {
 	volatile BufferDesc *buf;
-	volatile BufferDesc *lastbuffer;  //LIFO would use it
+	volatile BufferDesc *lastbuffer;  // LIFO would use it
 	static int timestamp[1048576] = {0};
 	static int times_of_replace = 0;
 	int i;
 	Latch	   *bgwriterLatch;
 	int			trycounter;
+	/* if the total times of replacement is bigger than 2^27,	
+	 * reset all timestamps.
+	 */
+	if (__LIFO)
+	{ 
+		if (times_of_replace > 134217728)
+		{
+			times_of_replace = 1;
+			for (i = 0; i < 1048576; i++)
+				timestamp[i] = 0;
+		}
+	}
 	/*
 	 * If given a strategy object, see whether it can select a buffer. We
 	 * assume strategy objects don't need the BufFreelistLock.
@@ -192,7 +204,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 
 	/* Nothing on the freelist, so run the "clock sweep" algorithm */
 	trycounter = NBuffers;
-	fprintf(stderr, "Buffer Size: %d\n", NBuffers);
+	printf("Buffer Size: %d\n", NBuffers);
 	if (__LIFO)
 	{	//LIFO, initialize the temp tag of last buffer
 		lastbuffer = NULL;
@@ -201,7 +213,6 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 	for (;;)
 	{
 		buf = &BufferDescriptors[StrategyControl->nextVictimBuffer];
-
 		if (++StrategyControl->nextVictimBuffer >= NBuffers)
 		{
 			StrategyControl->nextVictimBuffer = 0;
@@ -217,7 +228,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		{
 			// scaned a buffer and deduct the counter
 			trycounter--;
-			fprintf(stderr, "buf's id: %d; timestamp: %d\n",
+			printf("buf's id: %d; timestamp: %d\n",
 					buf->buf_id, timestamp[buf->buf_id]);			
 		}
 		if (buf->refcount == 0)
@@ -273,8 +284,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 				if (lastbuffer != NULL)
 				{
 					/* Found the newest buffer */					
-					fprintf(stderr,
-							"Replaced one's id: %d; timestamp:%d\n\n",
+					printf("Replaced one's id: %d; timestamp:%d\n\n",
 							lastbuffer->buf_id, timestamp[lastbuffer->buf_id]);
 					if (strategy != NULL)
 						AddBufferToRing(strategy, lastbuffer);
