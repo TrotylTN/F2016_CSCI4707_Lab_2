@@ -113,9 +113,11 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 {
 	volatile BufferDesc *buf;
 	volatile BufferDesc *lastbuffer;  //LIFO would use it
+	static int timestamp[1048576] = {0};
+	static int times_of_replace = 0;
+	int i;
 	Latch	   *bgwriterLatch;
 	int			trycounter;
-
 	/*
 	 * If given a strategy object, see whether it can select a buffer. We
 	 * assume strategy objects don't need the BufFreelistLock.
@@ -220,12 +222,13 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		{
 			if (__LIFO)
 			{	//LIFO
-				fprintf(stderr, "buf's id: %d\n", buf->buf_id);
+				fprintf(stderr, "buf's id: %d; timestamp: %d\n",
+						buf->buf_id, timestamp[buf->buf_id]);
 				if (lastbuffer == NULL)
 				{
 					lastbuffer = buf;
 				}
-				if (buf->buf_id > lastbuffer->buf_id)
+				if (timestamp[buf->buf_id] >= timestamp[lastbuffer->buf_id])
 				{
 					lastbuffer = buf;
 				}				
@@ -271,11 +274,12 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 				{
 					/* Found the newest buffer */					
 					fprintf(stderr,
-							"the id of buf would be replaced: %d\n\n",
-							lastbuffer->buf_id);
+							"Replaced one's id: %d; timestamp:%d\n\n",
+							lastbuffer->buf_id, timestamp[lastbuffer->buf_id]);
 					if (strategy != NULL)
 						AddBufferToRing(strategy, lastbuffer);
-					return buf;
+					timestamp[lastbuffer->buf_id] = ++times_of_replace;			
+					return lastbuffer;
 				}
 				else
 				{
