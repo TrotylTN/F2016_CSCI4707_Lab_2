@@ -18,7 +18,7 @@
 #include "storage/buf_internals.h"
 #include "storage/bufmgr.h"
 
-#define __LIFO 1
+
 /*
  * The shared freelist control information.
  */
@@ -112,24 +112,9 @@ volatile BufferDesc *
 StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 {
 	volatile BufferDesc *buf;
-	volatile BufferDesc *lastbuffer;  // LIFO would use it
-	static int timestamp[1048576] = {0};
-	static int times_of_replace = 0;
-	int i;
 	Latch	   *bgwriterLatch;
 	int			trycounter;
-	/* if the total times of replacement is bigger than 2^27,	
-	 * reset all timestamps.
-	 */
-	if (__LIFO)
-	{ 
-		if (times_of_replace > 134217728)
-		{
-			times_of_replace = 1;
-			for (i = 0; i < 1048576; i++)
-				timestamp[i] = 0;
-		}
-	}
+
 	/*
 	 * If given a strategy object, see whether it can select a buffer. We
 	 * assume strategy objects don't need the BufFreelistLock.
@@ -204,15 +189,10 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 
 	/* Nothing on the freelist, so run the "clock sweep" algorithm */
 	trycounter = NBuffers;
-	printf("Buffer Size: %d\n", NBuffers);
-	if (__LIFO)
-	{	//LIFO, initialize the temp tag of last buffer
-		lastbuffer = NULL;
-	}
-
 	for (;;)
 	{
 		buf = &BufferDescriptors[StrategyControl->nextVictimBuffer];
+
 		if (++StrategyControl->nextVictimBuffer >= NBuffers)
 		{
 			StrategyControl->nextVictimBuffer = 0;
@@ -224,43 +204,22 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		 * it; decrement the usage_count (unless pinned) and keep scanning.
 		 */
 		LockBufHdr(buf);
-		if (__LIFO) // LIFO
-		{
-			// scaned a buffer and deduct the counter
-			trycounter--;
-			printf("buf's id: %d; timestamp: %d\n",
-					buf->buf_id, timestamp[buf->buf_id]);			
-		}
 		if (buf->refcount == 0)
 		{
-			if (__LIFO)
-			{	// LIFO
-				if (lastbuffer == NULL)
-				{
-					lastbuffer = buf;
-				}
-				if (timestamp[buf->buf_id] >= timestamp[lastbuffer->buf_id])
-				{
-					lastbuffer = buf;
-				}			
+			if (buf->usage_count > 0)
+			{
+				buf->usage_count--;
+				trycounter = NBuffers;
 			}
 			else
-			{	//LRU				
-				if (buf->usage_count > 0)
-				{
-					buf->usage_count--;
-					trycounter = NBuffers;
-				}
-				else
-				{
-					/* Found a usable buffer */
-					if (strategy != NULL)
-						AddBufferToRing(strategy, buf);
-					return buf;
-				}
+			{
+				/* Found a usable buffer */
+				if (strategy != NULL)
+					AddBufferToRing(strategy, buf);
+				return buf;
 			}
 		}
-		else if ((!__LIFO) && (--trycounter == 0))
+		else if (--trycounter == 0)
 		{
 			/*
 			 * We've scanned all the buffers without making any state changes,
@@ -269,35 +228,10 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 			 * probably better to fail than to risk getting stuck in an
 			 * infinite loop.
 			 */
-			// LRU
 			UnlockBufHdr(buf);
 			elog(ERROR, "no unpinned buffers available");
 		}
 		UnlockBufHdr(buf);
-		if (__LIFO) //LIFO
-		{
-			if (trycounter == 0)
-			{
-				/* we've scanned all the buffers 
-				 * and tried to find the newest one
-				 */
-				if (lastbuffer != NULL)
-				{
-					/* Found the newest buffer */					
-					printf("Replaced one's id: %d; timestamp:%d\n\n",
-							lastbuffer->buf_id, timestamp[lastbuffer->buf_id]);
-					if (strategy != NULL)
-						AddBufferToRing(strategy, lastbuffer);
-					timestamp[lastbuffer->buf_id] = ++times_of_replace;			
-					return lastbuffer;
-				}
-				else
-				{
-					/* Found nothing*/
-					elog(ERROR, "no unpinned buffers available");	
-				}
-			}		
-		}
 	}
 
 	/* not reached */
