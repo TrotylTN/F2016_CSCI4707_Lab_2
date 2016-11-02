@@ -141,6 +141,8 @@ typedef struct sbufdesc
 
 	slock_t		buf_hdr_lock;	/* protects the above fields */
 
+	int			time_stamp;
+
 	int			buf_id;			/* buffer's index number (from 0) */
 	int			freeNext;		/* link in freelist chain */
 

@@ -18,6 +18,7 @@
 #include "storage/buf_internals.h"
 #include "storage/bufmgr.h"
 
+#define __LIFO 1
 
 /*
  * The shared freelist control information.
@@ -114,18 +115,50 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 	volatile BufferDesc *buf;
 	Latch	   *bgwriterLatch;
 	int			trycounter;
+	/* The variable used in LIFO*/
+	static int replacement_times = 1;
+	volatile BufferDesc *marked_buf;
+	int i, j;
+
+	if (__LIFO)
+	{
+		replacement_times++;
+		/* if the counter is bigger than 2^20, sort the existent timestamps
+		 * and reset all current timestamp of buffers as the previous order.
+		 */
+		if (replacement_times > (1<<21))
+		{
+			replacement_times = 1;
+			for (i = 0; i < NBuffers; i++)
+			{
+				marked_buf = BufferDescriptors;
+				buf = BufferDescriptors;
+				for (j = 0; j < NBuffers; buf++, j++)
+				{
+					if (buf->time_stamp > marked_buf->time_stamp)
+					{
+						marked_buf = buf;
+					}
+				}
+				marked_buf->time_stamp = -1 * i;
+			}
+		}
+	}
 
 	/*
 	 * If given a strategy object, see whether it can select a buffer. We
 	 * assume strategy objects don't need the BufFreelistLock.
 	 */
-	if (strategy != NULL)
+	if (!__LIFO)
 	{
-		buf = GetBufferFromRing(strategy);
-		if (buf != NULL)
+		if (strategy != NULL)
 		{
-			*lock_held = false;
-			return buf;
+			buf = GetBufferFromRing(strategy);
+			if (buf != NULL)
+			{
+				*lock_held = false;
+				return buf;
+			}
 		}
 	}
 
@@ -180,15 +213,29 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		LockBufHdr(buf);
 		if (buf->refcount == 0 && buf->usage_count == 0)
 		{
-			if (strategy != NULL)
-				AddBufferToRing(strategy, buf);
-			return buf;
+			if (__LIFO)
+			{
+				buf->time_stamp = replacement_times;
+				printf("Buffer[%d] inserted, time_stamp:%d\n", buf->buf_id, buf->time_stamp);
+				return buf;
+			}
+			else
+			{
+				if (strategy != NULL)
+					AddBufferToRing(strategy, buf);
+				return buf;
+			}
 		}
 		UnlockBufHdr(buf);
 	}
 
 	/* Nothing on the freelist, so run the "clock sweep" algorithm */
 	trycounter = NBuffers;
+	// LIFO
+	if (__LIFO)
+	{
+		marked_buf = NULL;
+	}
 	for (;;)
 	{
 		buf = &BufferDescriptors[StrategyControl->nextVictimBuffer];
@@ -199,6 +246,12 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 			StrategyControl->completePasses++;
 		}
 
+		if (__LIFO)
+		{
+			printf("Buffer[%d], time_stamp: %d\n",
+					buf->buf_id, buf->time_stamp);
+			trycounter--;
+		}
 		/*
 		 * If the buffer is pinned or has a nonzero usage_count, we cannot use
 		 * it; decrement the usage_count (unless pinned) and keep scanning.
@@ -206,20 +259,30 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		LockBufHdr(buf);
 		if (buf->refcount == 0)
 		{
-			if (buf->usage_count > 0)
+			if (__LIFO)
 			{
-				buf->usage_count--;
-				trycounter = NBuffers;
+				if (marked_buf == NULL)
+					marked_buf = buf;
+				if (buf->time_stamp > marked_buf->time_stamp)
+					marked_buf = buf;
 			}
 			else
 			{
-				/* Found a usable buffer */
-				if (strategy != NULL)
-					AddBufferToRing(strategy, buf);
-				return buf;
+				if (buf->usage_count > 0)
+				{
+					buf->usage_count--;
+					trycounter = NBuffers;
+				}
+				else
+				{
+					/* Found a usable buffer */
+					if (strategy != NULL)
+						AddBufferToRing(strategy, buf);
+					return buf;
+				}
 			}
 		}
-		else if (--trycounter == 0)
+		else if ((!__LIFO) && (--trycounter == 0))
 		{
 			/*
 			 * We've scanned all the buffers without making any state changes,
@@ -232,6 +295,26 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 			elog(ERROR, "no unpinned buffers available");
 		}
 		UnlockBufHdr(buf);
+
+		if (__LIFO)
+		{
+			if (trycounter == 0)
+			{
+				if (marked_buf == NULL)
+				{
+					// not found
+					elog(ERROR, "no unpinned buffers available");	
+				}
+				else
+				{
+					// found
+					printf("Replaced Buffer[%d], its timestamp:%d\n\n",
+							marked_buf->buf_id, marked_buf->time_stamp);
+					marked_buf->time_stamp = replacement_times;
+					return marked_buf;
+				}
+			}
+		}
 	}
 
 	/* not reached */
