@@ -49,6 +49,8 @@
 #include "utils/resowner.h"
 #include "utils/timestamp.h"
 
+#define __LIFO 1
+
 
 /* Note: these two macros only work on shared buffers, not local ones! */
 #define BufHdrGetBlock(bufHdr)	((Block) (BufferBlocks + ((Size) (bufHdr)->buf_id) * BLCKSZ))
@@ -79,6 +81,8 @@ int			target_prefetch_pages = 0;
 /* local state for StartBufferIO and related functions */
 static volatile BufferDesc *InProgressBuf = NULL;
 static bool IsForInput;
+
+static int times_of_IO = 0;
 
 /* local state for LockBufferForCleanup */
 static volatile BufferDesc *PinCountWaitBuf = NULL;
@@ -294,6 +298,40 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 	bool		isExtend;
 	bool		isLocalBuf = SmgrIsTemp(smgr);
 
+	volatile BufferDesc *marked_buf;
+	volatile BufferDesc *temp_buf;
+	int i, j;
+
+    if (__LIFO)
+    {
+        /* if the counter is bigger than 2^20, 
+         * reset all current timestamp of buffers as the previous order.
+         */
+        if (times_of_IO > (1<<21))
+        {
+            times_of_IO = NBuffers;
+            for (i = NBuffers; i > 0; i--)
+            {
+                marked_buf = BufferDescriptors;
+                temp_buf = BufferDescriptors;
+                for (j = 0; j < NBuffers; temp_buf++, j++)
+                {
+                    if (temp_buf->time_stamp > marked_buf->time_stamp)
+                    {
+                        marked_buf = temp_buf;
+                    }
+                }
+                marked_buf->time_stamp = -1 * i;
+            }
+            temp_buf = BufferDescriptors;
+            for (j = 0; j < NBuffers; temp_buf++, j++)
+            {
+            	temp_buf->time_stamp = temp_buf->time_stamp * -1;
+            }
+        }
+    }
+
+
 	*hit = false;
 
 	/* Make sure we will have room to remember the buffer pin */
@@ -355,7 +393,10 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 											  smgr->smgr_rnode.backend,
 											  isExtend,
 											  found);
-
+			if (__LIFO) // LIFO
+			{
+				bufHdr->time_stamp = ++times_of_IO;
+			}
 			return BufferDescriptorGetBuffer(bufHdr);
 		}
 
@@ -500,7 +541,10 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 									  smgr->smgr_rnode.backend,
 									  isExtend,
 									  found);
-
+	if (__LIFO)
+	{
+		bufHdr->time_stamp = ++times_of_IO;
+	}
 	return BufferDescriptorGetBuffer(bufHdr);
 }
 
@@ -598,7 +642,6 @@ BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 	for (;;)
 	{
 		bool		lock_held;
-
 		/*
 		 * Select a victim buffer.	The buffer is returned with its header
 		 * spinlock still held!  Also (in most cases) the BufFreelistLock is
@@ -663,6 +706,7 @@ BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 				}
 
 				/* OK, do the I/O */
+
 				TRACE_POSTGRESQL_BUFFER_WRITE_DIRTY_START(forkNum, blockNum,
 											   smgr->smgr_rnode.node.spcNode,
 												smgr->smgr_rnode.node.dbNode,
