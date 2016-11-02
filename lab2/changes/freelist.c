@@ -121,16 +121,14 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 	 * If given a strategy object, see whether it can select a buffer. We
 	 * assume strategy objects don't need the BufFreelistLock.
 	 */
-	if (!__LIFO)
+
+	if (strategy != NULL)
 	{
-		if (strategy != NULL)
+		buf = GetBufferFromRing(strategy);
+		if (buf != NULL)
 		{
-			buf = GetBufferFromRing(strategy);
-			if (buf != NULL)
-			{
-				*lock_held = false;
-				return buf;
-			}
+			*lock_held = false;
+			return buf;
 		}
 	}
 
@@ -185,16 +183,9 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		LockBufHdr(buf);
 		if (buf->refcount == 0 && buf->usage_count == 0)
 		{
-			if (__LIFO)
-			{
-				return buf;
-			}
-			else
-			{
-				if (strategy != NULL)
-					AddBufferToRing(strategy, buf);
-				return buf;
-			}
+			if (strategy != NULL)
+				AddBufferToRing(strategy, buf);
+			return buf;
 		}
 		UnlockBufHdr(buf);
 	}
@@ -282,6 +273,8 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 					printf("---- Buffer Chosen to be Replaced ----\n");
 					printf("Buffer[%d], time_stamp:%d\n\n",
 							marked_buf->buf_id, marked_buf->time_stamp);
+					if (strategy != NULL)
+						AddBufferToRing(strategy, marked_buf);
 					return marked_buf;
 				}
 			}
