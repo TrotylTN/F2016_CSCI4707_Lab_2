@@ -3,7 +3,6 @@ Students:
 2. Xuan Bi (bixxx078)
 
 Brief Summary:
-<A Brief Summary about the change you make (1 Paragraph max)>
 In the function called 'StrategyGetBuffer', we modified the strategy which the function uses to get the most recently used buffer. And let the function pick and return the newest buffer from the pool for each call. We used the times of replacement as timestamp of a buffer.
 
 Detailed Changes:
@@ -14,3 +13,13 @@ Detailed Changes:
 2. <Modified File 2>: <Path from src>
 	- <Detailed changes of the file>.
 etc.
+
+1. buf_internals.h
+ 
+2. buf_init.c
+
+3. freelist.c
+
+4. bufmgr.c
+
+

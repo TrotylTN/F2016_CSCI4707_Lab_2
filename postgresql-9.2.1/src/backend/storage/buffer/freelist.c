@@ -115,35 +115,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 	volatile BufferDesc *buf;
 	Latch	   *bgwriterLatch;
 	int			trycounter;
-	/* The variable used in LIFO*/
-	static int replacement_times = 1;
 	volatile BufferDesc *marked_buf;
-	int i, j;
-
-	if (__LIFO)
-	{
-		replacement_times++;
-		/* if the counter is bigger than 2^20, sort the existent timestamps
-		 * and reset all current timestamp of buffers as the previous order.
-		 */
-		if (replacement_times > (1<<21))
-		{
-			replacement_times = 1;
-			for (i = 0; i < NBuffers; i++)
-			{
-				marked_buf = BufferDescriptors;
-				buf = BufferDescriptors;
-				for (j = 0; j < NBuffers; buf++, j++)
-				{
-					if (buf->time_stamp > marked_buf->time_stamp)
-					{
-						marked_buf = buf;
-					}
-				}
-				marked_buf->time_stamp = -1 * i;
-			}
-		}
-	}
 
 	/*
 	 * If given a strategy object, see whether it can select a buffer. We
@@ -215,8 +187,6 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		{
 			if (__LIFO)
 			{
-				buf->time_stamp = replacement_times;
-				printf("Buffer[%d] inserted, time_stamp:%d\n", buf->buf_id, buf->time_stamp);
 				return buf;
 			}
 			else
@@ -310,7 +280,6 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 					// found
 					printf("Replaced Buffer[%d], its timestamp:%d\n\n",
 							marked_buf->buf_id, marked_buf->time_stamp);
-					marked_buf->time_stamp = replacement_times;
 					return marked_buf;
 				}
 			}
