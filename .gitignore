@@ -1,6 +1,7 @@
 postgresql-9.2.1.tar.gz
 sqlapp/
 sqlapp/*
+lab2.zip
 # Object files
 *.o
 *.ko
