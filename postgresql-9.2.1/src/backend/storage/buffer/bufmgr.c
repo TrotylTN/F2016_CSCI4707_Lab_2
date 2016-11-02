@@ -82,8 +82,6 @@ int			target_prefetch_pages = 0;
 static volatile BufferDesc *InProgressBuf = NULL;
 static bool IsForInput;
 
-static int times_of_IO = 0;
-
 /* local state for LockBufferForCleanup */
 static volatile BufferDesc *PinCountWaitBuf = NULL;
 
@@ -112,6 +110,8 @@ static volatile BufferDesc *BufferAlloc(SMgrRelation smgr,
 static void FlushBuffer(volatile BufferDesc *buf, SMgrRelation reln);
 static void AtProcExit_Buffers(int code, Datum arg);
 
+// the counter which is used in the LIFO processing
+static int reading_seq_counter = (1 << 21) + 1;
 
 /*
  * PrefetchBuffer -- initiate asynchronous read of a block of a relation
@@ -307,9 +307,11 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
         /* if the counter is bigger than 2^20, 
          * reset all current timestamp of buffers as the previous order.
          */
-        if (times_of_IO > (1<<21))
+        if (reading_seq_counter > (1<<21))
         {
-            times_of_IO = NBuffers;
+        	// reset all counter
+        	printf("Sequentializing all timestamps.\n\n");
+            reading_seq_counter = NBuffers;
             for (i = NBuffers; i > 0; i--)
             {
                 marked_buf = BufferDescriptors;
@@ -369,7 +371,19 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 		if (found)
 			pgBufferUsage.shared_blks_hit++;
 		else
+		{
+			// just buffer with new reading in data needs update
+			// timestamp.
 			pgBufferUsage.shared_blks_read++;
+			if (__LIFO)
+			{
+                // to prevent multi-threading reseting the counter
+				if (bufHdr->time_stamp > reading_seq_counter)
+					reading_seq_counter = bufHdr->time_stamp;
+				reading_seq_counter++;
+				bufHdr->time_stamp = reading_seq_counter;
+			}
+		}
 	}
 
 	/* At this point we do NOT hold any locks. */
@@ -393,10 +407,6 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 											  smgr->smgr_rnode.backend,
 											  isExtend,
 											  found);
-			if (__LIFO) // LIFO
-			{
-				bufHdr->time_stamp = ++times_of_IO;
-			}
 			return BufferDescriptorGetBuffer(bufHdr);
 		}
 
@@ -541,10 +551,6 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 									  smgr->smgr_rnode.backend,
 									  isExtend,
 									  found);
-	if (__LIFO)
-	{
-		bufHdr->time_stamp = ++times_of_IO;
-	}
 	return BufferDescriptorGetBuffer(bufHdr);
 }
 
@@ -892,7 +898,6 @@ BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 		*foundPtr = FALSE;
 	else
 		*foundPtr = TRUE;
-
 	return buf;
 }
 

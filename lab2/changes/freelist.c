@@ -270,6 +270,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 				else
 				{
 					// found
+					LockBufHdr(marked_buf);
 					printf("---- Buffer Chosen to be Replaced ----\n");
 					printf("Buffer[%d], time_stamp:%d\n\n",
 							marked_buf->buf_id, marked_buf->time_stamp);
