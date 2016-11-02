@@ -19,6 +19,7 @@
 #include "storage/bufmgr.h"
 
 #define __LIFO 1
+
 /*
  * The shared freelist control information.
  */
@@ -112,35 +113,24 @@ volatile BufferDesc *
 StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 {
 	volatile BufferDesc *buf;
-	volatile BufferDesc *lastbuffer;  // LIFO would use it
-	static int timestamp[1048576] = {0};
-	static int times_of_replace = 0;
-	int i;
 	Latch	   *bgwriterLatch;
 	int			trycounter;
-	/* if the total times of replacement is bigger than 2^27,	
-	 * reset all timestamps.
-	 */
-	if (__LIFO)
-	{ 
-		if (times_of_replace > 134217728)
-		{
-			times_of_replace = 1;
-			for (i = 0; i < 1048576; i++)
-				timestamp[i] = 0;
-		}
-	}
+	volatile BufferDesc *marked_buf;
+
 	/*
 	 * If given a strategy object, see whether it can select a buffer. We
 	 * assume strategy objects don't need the BufFreelistLock.
 	 */
-	if (strategy != NULL)
+	if (!__LIFO)
 	{
-		buf = GetBufferFromRing(strategy);
-		if (buf != NULL)
+		if (strategy != NULL)
 		{
-			*lock_held = false;
-			return buf;
+			buf = GetBufferFromRing(strategy);
+			if (buf != NULL)
+			{
+				*lock_held = false;
+				return buf;
+			}
 		}
 	}
 
@@ -195,57 +185,59 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		LockBufHdr(buf);
 		if (buf->refcount == 0 && buf->usage_count == 0)
 		{
-			if (strategy != NULL)
-				AddBufferToRing(strategy, buf);
-			return buf;
+			if (__LIFO)
+			{
+				return buf;
+			}
+			else
+			{
+				if (strategy != NULL)
+					AddBufferToRing(strategy, buf);
+				return buf;
+			}
 		}
 		UnlockBufHdr(buf);
 	}
 
 	/* Nothing on the freelist, so run the "clock sweep" algorithm */
 	trycounter = NBuffers;
-	printf("Buffer Size: %d\n", NBuffers);
+	// LIFO
 	if (__LIFO)
-	{	//LIFO, initialize the temp tag of last buffer
-		lastbuffer = NULL;
+	{
+		marked_buf = NULL;
 	}
-
 	for (;;)
 	{
 		buf = &BufferDescriptors[StrategyControl->nextVictimBuffer];
+
 		if (++StrategyControl->nextVictimBuffer >= NBuffers)
 		{
 			StrategyControl->nextVictimBuffer = 0;
 			StrategyControl->completePasses++;
 		}
 
+		if (__LIFO)
+		{
+			printf("Buffer[%d], time_stamp: %d\n",
+					buf->buf_id, buf->time_stamp);
+			trycounter--;
+		}
 		/*
 		 * If the buffer is pinned or has a nonzero usage_count, we cannot use
 		 * it; decrement the usage_count (unless pinned) and keep scanning.
 		 */
 		LockBufHdr(buf);
-		if (__LIFO) // LIFO
-		{
-			// scaned a buffer and deduct the counter
-			trycounter--;
-			printf("buf's id: %d; timestamp: %d\n",
-					buf->buf_id, timestamp[buf->buf_id]);			
-		}
 		if (buf->refcount == 0)
 		{
 			if (__LIFO)
-			{	// LIFO
-				if (lastbuffer == NULL)
-				{
-					lastbuffer = buf;
-				}
-				if (timestamp[buf->buf_id] >= timestamp[lastbuffer->buf_id])
-				{
-					lastbuffer = buf;
-				}			
+			{
+				if (marked_buf == NULL)
+					marked_buf = buf;
+				if (buf->time_stamp > marked_buf->time_stamp)
+					marked_buf = buf;
 			}
 			else
-			{	//LRU				
+			{
 				if (buf->usage_count > 0)
 				{
 					buf->usage_count--;
@@ -269,34 +261,28 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 			 * probably better to fail than to risk getting stuck in an
 			 * infinite loop.
 			 */
-			// LRU
 			UnlockBufHdr(buf);
 			elog(ERROR, "no unpinned buffers available");
 		}
 		UnlockBufHdr(buf);
-		if (__LIFO) //LIFO
+
+		if (__LIFO)
 		{
 			if (trycounter == 0)
 			{
-				/* we've scanned all the buffers 
-				 * and tried to find the newest one
-				 */
-				if (lastbuffer != NULL)
+				if (marked_buf == NULL)
 				{
-					/* Found the newest buffer */					
-					printf("Replaced one's id: %d; timestamp:%d\n\n",
-							lastbuffer->buf_id, timestamp[lastbuffer->buf_id]);
-					if (strategy != NULL)
-						AddBufferToRing(strategy, lastbuffer);
-					timestamp[lastbuffer->buf_id] = ++times_of_replace;			
-					return lastbuffer;
+					// not found
+					elog(ERROR, "no unpinned buffers available");	
 				}
 				else
 				{
-					/* Found nothing*/
-					elog(ERROR, "no unpinned buffers available");	
+					// found
+					printf("Replaced Buffer[%d], its timestamp:%d\n\n",
+							marked_buf->buf_id, marked_buf->time_stamp);
+					return marked_buf;
 				}
-			}		
+			}
 		}
 	}
 
