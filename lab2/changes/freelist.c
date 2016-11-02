@@ -205,6 +205,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 	if (__LIFO)
 	{
 		marked_buf = NULL;
+		printf("---- Available Buffers ----\n");
 	}
 	for (;;)
 	{
@@ -218,8 +219,6 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 
 		if (__LIFO)
 		{
-			printf("Buffer[%d], time_stamp: %d\n",
-					buf->buf_id, buf->time_stamp);
 			trycounter--;
 		}
 		/*
@@ -231,6 +230,8 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 		{
 			if (__LIFO)
 			{
+				printf("Buffer[%d], time_stamp: %d\n",
+						buf->buf_id, buf->time_stamp);
 				if (marked_buf == NULL)
 					marked_buf = buf;
 				if (buf->time_stamp > marked_buf->time_stamp)
@@ -273,12 +274,13 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 				if (marked_buf == NULL)
 				{
 					// not found
-					elog(ERROR, "no unpinned buffers available");	
+					elog(ERROR, "no unpinned buffers available");
 				}
 				else
 				{
 					// found
-					printf("Replaced Buffer[%d], its timestamp:%d\n\n",
+					printf("---- Buffer Chosen to be Replaced ----\n");
+					printf("Buffer[%d], time_stamp:%d\n\n",
 							marked_buf->buf_id, marked_buf->time_stamp);
 					return marked_buf;
 				}
