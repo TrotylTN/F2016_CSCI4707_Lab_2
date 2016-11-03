@@ -225,7 +225,7 @@ StrategyGetBuffer(BufferAccessStrategy strategy, bool *lock_held)
 						buf->buf_id, buf->time_stamp);
 				if (marked_buf == NULL)
 					marked_buf = buf;
-				if (buf->time_stamp > marked_buf->time_stamp)
+				if (buf->time_stamp >= marked_buf->time_stamp)
 					marked_buf = buf;
 			}
 			else
