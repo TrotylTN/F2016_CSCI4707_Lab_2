@@ -310,7 +310,7 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
         if (reading_seq_counter > (1<<21))
         {
         	// reset all counter
-        	printf("\n# Sequentializing all timestamps. #\n");
+        	printf("\n# Sequentializing all timestamps. #\n\n");
             reading_seq_counter = NBuffers;
             for (i = NBuffers; i > 0; i--)
             {
