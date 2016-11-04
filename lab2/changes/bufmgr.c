@@ -304,7 +304,7 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 
     if (__LIFO)
     {
-        /* if the counter is bigger than 2^20,
+        /* if the counter is bigger than 2^20, 
          * reset all current timestamp of buffers as the previous order.
          */
         if (reading_seq_counter > (1<<21))
@@ -314,25 +314,20 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
             reading_seq_counter = NBuffers;
             for (i = NBuffers; i > 0; i--)
             {
-				// select the buffer with the biggest seq_num
                 marked_buf = BufferDescriptors;
                 temp_buf = BufferDescriptors;
                 for (j = 0; j < NBuffers; temp_buf++, j++)
                 {
-					// with the same timestamp, the back one must be older
-                    if (temp_buf->time_stamp >= marked_buf->time_stamp)
+                    if (temp_buf->time_stamp > marked_buf->time_stamp)
                     {
                         marked_buf = temp_buf;
                     }
                 }
-				// mark the biggest buffer with negative seq_num to avoid it
-				// affects further selection
                 marked_buf->time_stamp = -1 * i;
             }
             temp_buf = BufferDescriptors;
             for (j = 0; j < NBuffers; temp_buf++, j++)
             {
-				// turn the negative seq_num back to positive
             	temp_buf->time_stamp = temp_buf->time_stamp * -1;
             }
         }
