@@ -319,7 +319,7 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
                 temp_buf = BufferDescriptors;
                 for (j = 0; j < NBuffers; temp_buf++, j++)
                 {
-					// with the same timestamp, the back one must be newer
+					// with the same timestamp, the back one must be older
                     if (temp_buf->time_stamp >= marked_buf->time_stamp)
                     {
                         marked_buf = temp_buf;
